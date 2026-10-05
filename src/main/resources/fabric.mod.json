@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "autoattack",
+  "version": "${version}",
+  "name": "Auto Attack",
+  "description": "Auto-click and auto-rotate toward hostile mobs, with an adjustable rotation speed slider. Client side only.",
+  "authors": ["You"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.example.autoattack.AutoAttackClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.1",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
