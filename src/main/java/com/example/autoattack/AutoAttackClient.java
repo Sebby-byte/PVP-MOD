@@ -39,7 +39,7 @@ import net.fabricmc.loader.api.FabricLoader;
  *
  *  Auto Click  - presses your Attack key (a plain left click) while your crosshair is on a hostile
  *                mob or another player within normal reach. It sends no attack commands of its own.
- *  Auto Rotate - turns your view toward the nearest hostile mob or player within 6 blocks that you have a
+ *  Auto Rotate - turns your view toward the nearest hostile mob or player within the set range (default 6 blocks) that you have a
  *                clear line of sight to. Rotation speed (degrees per tick) is set with a slider
  *                in the settings screen.
  *
@@ -50,7 +50,9 @@ import net.fabricmc.loader.api.FabricLoader;
 public class AutoAttackClient implements ClientModInitializer {
     public static final String MOD_ID = "autoattack";
 
-    public static final double ROTATE_RANGE = 6.0;
+    public static final float MIN_RANGE = 1.0f;
+    public static final float MAX_RANGE = 45.0f;
+    public static final float DEFAULT_RANGE = 6.0f;
     public static final float MIN_SPEED = 1.0f;
     public static final float MAX_SPEED = 45.0f;
     private static final float MIN_ATTACK_STRENGTH = 0.95f;
@@ -58,6 +60,7 @@ public class AutoAttackClient implements ClientModInitializer {
     private static boolean autoClick = false;
     private static boolean autoRotate = false;
     private static float rotateSpeed = 10.0f; // max degrees turned per tick (saved)
+    private static float rotateRange = DEFAULT_RANGE; // blocks (saved)
     private static final Set<String> allowedServers = new HashSet<>();
 
     private static KeyMapping toggleClickKey, toggleRotateKey, settingsKey;
@@ -85,6 +88,11 @@ public class AutoAttackClient implements ClientModInitializer {
     public static boolean isAutoClick() { return autoClick; }
     public static boolean isAutoRotate() { return autoRotate; }
     public static float getRotateSpeed() { return rotateSpeed; }
+    public static float getRotateRange() { return rotateRange; }
+
+    public static void setRotateRange(float range) {
+        rotateRange = Mth.clamp(range, MIN_RANGE, MAX_RANGE);
+    }
 
     public static void setRotateSpeed(float speed) {
         rotateSpeed = Mth.clamp(speed, MIN_SPEED, MAX_SPEED);
@@ -197,18 +205,18 @@ public class AutoAttackClient implements ClientModInitializer {
     }
 
     private static LivingEntity findNearestHostile(ClientLevel level, LocalPlayer player) {
-        AABB box = player.getBoundingBox().inflate(ROTATE_RANGE);
+        AABB box = player.getBoundingBox().inflate(rotateRange);
         List<Entity> nearby = level.getEntities(player, box);
 
         LivingEntity best = null;
-        double bestDistSq = ROTATE_RANGE * ROTATE_RANGE;
+        double bestDistSq = (double) rotateRange * rotateRange;
 
         for (Entity e : nearby) {
             if (!(e instanceof LivingEntity living) || !living.isAlive()) continue;
             if (!isValidTarget(player, e)) continue; // hostile mobs and other players
 
             double distSq = player.distanceToSqr(e);
-            if (distSq > bestDistSq) continue;            // within 6 blocks
+            if (distSq > bestDistSq) continue;            // within the configured range
             if (!player.hasLineOfSight(e)) continue;      // not through walls
 
             best = living;
@@ -225,6 +233,22 @@ public class AutoAttackClient implements ClientModInitializer {
     }
 
     // ---------------------------------------------------------------- server allowlist
+
+    /** True when connected to a multiplayer server that is not on the allowlist yet. */
+    public static boolean canAllowCurrentServer(Minecraft mc) {
+        return mc.getSingleplayerServer() == null && mc.getCurrentServer() != null && !isAllowedHere(mc);
+    }
+
+    /** Adds the server you are connected to onto the allowlist (saved to the config file). */
+    public static void allowCurrentServer(Minecraft mc) {
+        ServerData server = mc.getCurrentServer();
+        if (mc.getSingleplayerServer() != null || server == null) return;
+        String full = server.ip.trim().toLowerCase(Locale.ROOT);
+        allowedServers.add(hostOnly(full));
+        saveConfig();
+        say(mc.player, "Allowed " + hostOnly(full) + " for this and future sessions. "
+                + "Only use this where automation is permitted.");
+    }
 
     private static boolean isAllowedHere(Minecraft mc) {
         if (mc.getSingleplayerServer() != null) return true; // singleplayer / opened-to-LAN own world
@@ -268,6 +292,12 @@ public class AutoAttackClient implements ClientModInitializer {
             rotateSpeed = 10.0f;
         }
 
+        try {
+            setRotateRange(Float.parseFloat(props.getProperty("rotateRange", Float.toString(DEFAULT_RANGE))));
+        } catch (NumberFormatException e) {
+            rotateRange = DEFAULT_RANGE;
+        }
+
         allowedServers.clear();
         for (String entry : props.getProperty("allowedServers", "localhost,127.0.0.1").split(",")) {
             String s = entry.trim().toLowerCase(Locale.ROOT);
@@ -280,11 +310,12 @@ public class AutoAttackClient implements ClientModInitializer {
     public static void saveConfig() {
         Properties props = new Properties();
         props.setProperty("rotateSpeed", Float.toString(rotateSpeed));
+        props.setProperty("rotateRange", Float.toString(rotateRange));
         props.setProperty("allowedServers", String.join(",", allowedServers));
 
         try (OutputStream out = Files.newOutputStream(configPath())) {
             props.store(out, "Auto Attack. allowedServers = comma-separated server addresses where automation "
-                    + "is permitted (singleplayer is always allowed). rotateSpeed = max degrees per tick.");
+                    + "is permitted (singleplayer is always allowed). rotateSpeed = max degrees per tick. rotateRange = auto rotate range in blocks (1-45).");
         } catch (IOException ignored) {
         }
     }
